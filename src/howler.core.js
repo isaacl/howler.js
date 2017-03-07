@@ -392,11 +392,7 @@
       // Check if any sounds are playing.
       for (var i=0; i<self._howls.length; i++) {
         if (self._howls[i]._webAudio) {
-          for (var j=0; j<self._howls[i]._sounds.length; j++) {
-            if (!self._howls[i]._sounds[j]._paused) {
-              return self;
-            }
-          }
+          return self._howls[i]._sounds.length > 0;
         }
       }
 
@@ -520,7 +516,6 @@
       self._onload = o.onload ? [{fn: o.onload}] : [];
       self._onloaderror = o.onloaderror ? [{fn: o.onloaderror}] : [];
       self._onplayerror = o.onplayerror ? [{fn: o.onplayerror}] : [];
-      self._onpause = o.onpause ? [{fn: o.onpause}] : [];
       self._onplay = o.onplay ? [{fn: o.onplay}] : [];
       self._onstop = o.onstop ? [{fn: o.onstop}] : [];
       self._onvolume = o.onvolume ? [{fn: o.onvolume}] : [];
@@ -659,24 +654,6 @@
       } else if (typeof sprite === 'undefined') {
         // Use the default sound sprite (plays the full audio length).
         sprite = '__default';
-
-        // Check if there is a single paused sound that isn't ended. 
-        // If there is, play that sound. If not, continue as usual.  
-        if (!self._playLock) {
-          var num = 0;
-          for (var i=0; i<self._sounds.length; i++) {
-            if (self._sounds[i]._paused && !self._sounds[i]._ended) {
-              num++;
-              id = self._sounds[i]._id;
-            }
-          }
-
-          if (num === 1) {
-            sprite = null;
-          } else {
-            id = null;
-          }
-        }
       }
 
       // Get the selected node, or get one from the pool.
@@ -715,7 +692,7 @@
       }
 
       // Don't play the sound if an id was passed and it is already playing.
-      if (id && !sound._paused) {
+      if (id) {
         // Trigger the play event, in order to keep iterating through queue.
         if (!internal) {
           self._loadQueue('play');
@@ -743,7 +720,6 @@
 
       // Update the parameters of the sound.
       var setParams = function() {
-        sound._paused = false;
         sound._start = start;
         sound._stop = stop;
       };
@@ -902,69 +878,6 @@
     },
 
     /**
-     * Pause playback and save current position.
-     * @param  {Number} id The sound ID (empty to pause all in group).
-     * @return {Howl}
-     */
-    pause: function(id) {
-      var self = this;
-
-      // If the sound hasn't loaded or a play() promise is pending, add it to the load queue to pause when capable.
-      if (self._state !== 'loaded' || self._playLock) {
-        self._queue.push({
-          event: 'pause',
-          action: function() {
-            self.pause(id);
-          }
-        });
-
-        return self;
-      }
-
-      // If no id is passed, get all ID's to be paused.
-      var ids = self._getSoundIds(id);
-
-      for (var i=0; i<ids.length; i++) {
-        // Clear the end timer.
-        self._clearTimer(ids[i]);
-
-        // Get the sound.
-        var sound = self._soundById(ids[i]);
-
-        if (sound && !sound._paused) {
-          sound._paused = true;
-
-          if (sound._node) {
-            if (self._webAudio) {
-              // Make sure the sound has been created.
-              if (!sound._node.bufferSource) {
-                continue;
-              }
-
-              if (typeof sound._node.bufferSource.stop === 'undefined') {
-                sound._node.bufferSource.noteOff(0);
-              } else {
-                sound._node.bufferSource.stop(0);
-              }
-
-              // Clean up the buffer source.
-              self._cleanBuffer(sound._node);
-            } else if (!isNaN(sound._node.duration) || sound._node.duration === Infinity) {
-              sound._node.pause();
-            }
-          }
-        }
-
-        // Fire the pause event, unless `true` is passed as the 2nd argument.
-        if (!arguments[1]) {
-          self._emit('pause', sound ? sound._id : null);
-        }
-      }
-
-      return self;
-    },
-
-    /**
      * Stop playback and reset to start.
      * @param  {Number} id The sound ID (empty to stop all in group).
      * @param  {Boolean} internal Internal Use: true prevents event firing.
@@ -996,7 +909,6 @@
         var sound = self._soundById(ids[i]);
 
         if (sound) {
-          sound._paused = true;
           sound._ended = true;
 
           if (sound._node) {
@@ -1119,18 +1031,11 @@
 
       // Check the passed sound ID (if any).
       if (typeof id === 'number') {
-        var sound = self._soundById(id);
-        return sound ? !sound._paused : false;
+        return !!self._soundById(id);
       }
 
       // Otherwise, loop through all sounds and check if any are playing.
-      for (var i=0; i<self._sounds.length; i++) {
-        if (!self._sounds[i]._paused) {
-          return true;
-        }
-      }
-
-      return false;
+      return self._sounds.length > 0;
     },
 
     /**
@@ -1170,9 +1075,7 @@
       var sounds = self._sounds;
       for (var i=0; i<sounds.length; i++) {
         // Stop the sound if it is currently playing.
-        if (!sounds[i]._paused) {
-          self.stop(sounds[i]._id);
-        }
+        self.stop(sounds[i]._id);
 
         // Remove the source or disconnect.
         if (!self._webAudio) {
@@ -1382,7 +1285,6 @@
 
       // Mark the node as paused.
       if (self._webAudio) {
-        sound._paused = true;
         sound._ended = true;
         self._clearTimer(sound._id);
 
@@ -1601,7 +1503,6 @@
 
       // Setup the default parameters.
       self._volume = parent._volume;
-      self._paused = true;
       self._ended = true;
       self._sprite = '__default';
 
@@ -1630,7 +1531,6 @@
         // Create the gain node for controlling volume (the source will connect to this).
         self._node = (typeof Howler.ctx.createGain === 'undefined') ? Howler.ctx.createGainNode() : Howler.ctx.createGain();
         self._node.gain.setValueAtTime(volume, Howler.ctx.currentTime);
-        self._node.paused = true;
         self._node.connect(Howler.masterGain);
       } else {
         // Get an unlocked Audio object from the pool.
@@ -1666,7 +1566,6 @@
 
       // Reset all of the parameters of this sound.
       self._volume = parent._volume;
-      self._paused = true;
       self._ended = true;
       self._sprite = '__default';
 
